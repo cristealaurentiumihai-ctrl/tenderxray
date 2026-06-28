@@ -5,13 +5,53 @@ import os
 import zipfile
 import docx2txt
 import pandas as pd
+import sqlite3
 import re
-import requests
-import io
 
-st.set_page_config(page_title="TenderX-Ray Ultra AI", page_icon="🕵️‍♂️", layout="wide")
-st.title("🕵️‍♂️ TenderX-Ray Ultra — Conexiune Inteligentă Pro")
-st.write("Sistem rezistent de audit structural conectat la infrastructura de date publice și analiză de risc.")
+st.set_page_config(page_title="TenderX-Ray Pro — IT & Construcții", page_icon="🕵️‍♂️", layout="wide")
+st.title("🕵️‍♂️ TenderX-Ray Ultra — Audit IT & Lucrări")
+st.write("Sistem autonom de analiză structurală bazat pe indicatori de risc în construcții și sisteme integrate IT.")
+
+# --- INIȚIALIZARE ȘI CONFIGURARE BAZĂ DE DATE SQL LOCALĂ ---
+DB_FILE = "achizitii_strategice.db"
+
+def initializare_baza_date():
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    # Creăm tabela de istoric SEAP
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS istoric_seap (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            autoritate_contractanta TEXT,
+            contractant_castigator TEXT,
+            domeniu TEXT,
+            valoare_eur REAL,
+            numar_contracte INTEGER
+        )
+    """)
+    
+    # Verificăm dacă este goală pentru a introduce date demonstrative targetate
+    cursor.execute("SELECT COUNT(*) FROM istoric_seap")
+    if cursor.fetchone()[0] == 0:
+        date_demo = [
+            # Sector: Construcții / Lucrări (Exemple de tipare repetitive)
+            ("Direcția Regională de Drumuri și Poduri X", "Construct Infrastructura SRL", "Construcții / Lucrări", 4500000, 14),
+            ("Primăria Municipiului Z", "Euro Build Transilvania SA", "Construcții / Lucrări", 12000000, 8),
+            ("Consiliul Județean Y", "Construct Infrastructura SRL", "Construcții / Lucrări", 8900000, 19),
+            # Sector: IT & Sisteme Integrate
+            ("Autoritatea Digitală Națională", "Sisteme Integrate Cyber RO", "IT / Sisteme Integrate", 3200000, 6),
+            ("Ministerul Cloud-ului și Tehnologiei", "NetNetwork Solutions SRL", "IT / Sisteme Integrate", 1500000, 4),
+            ("Serviciul de Monitorizare Publică", "Sisteme Integrate Cyber RO", "IT / Sisteme Integrate", 5400000, 11),
+            ("Spitalul Clinic de Urgență", "MedIT Software Solutions", "IT / Sisteme Integrate", 850000, 3)
+        ]
+        cursor.executemany("""
+            INSERT INTO istoric_seap (autoritate_contractanta, contractant_castigator, domeniu, valoare_eur, numar_contracte)
+            VALUES (?, ?, ?, ?, ?)
+        """, date_demo)
+        conn.commit()
+    conn.close()
+
+initializare_baza_date()
 
 # --- SIDEBAR CONFIGURARE ---
 st.sidebar.header("⚙️ Configurare Sistem")
@@ -22,98 +62,36 @@ lista_modele = ["gemini-1.5-flash", "gemini-2.5-flash", "gemini-1.5-pro"]
 model_ales = st.sidebar.selectbox("Alege Modelul AI:", lista_modele, index=0)
 
 st.sidebar.markdown("---")
-st.sidebar.header("🌐 Conector Guvernamental Automat")
-termen_cautare = st.sidebar.text_input("Caută în baza Gov după:", value="achizitii publice")
+st.sidebar.header("🎯 Filtrare Istoric SEAP (SQL)")
+domeniu_selectat = st.sidebar.selectbox("Focalizare analiză piață:", ["Toate", "Construcții / Lucrări", "IT / Sisteme Integrate"])
 
-# --- FUNCTIE AUTOMATĂ DE DESCARCARE CU MASCARE USER-AGENT ---
-@st.cache_data(ttl=3600)
-def descarca_date_guvern_live(query):
-    try:
-        # Mascăm scriptul ca fiind un browser legitim (evită blocajele de firewall)
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Accept": "application/json"
-        }
-        
-        api_url = f"https://data.gov.ro/api/3/action/package_search?q={query}"
-        response = requests.get(api_url, headers=headers, timeout=12)
-        
-        if response.status_code != 200:
-            return None, "Filtru firewall detectat sau server Gov offline."
-        
-        date_catalog = response.json()
-        pachete_gasite = date_catalog.get("result", {}).get("results", [])
-        
-        if not pachete_gasite:
-            return None, f"Nu am găsit registre pentru: '{query}'."
-        
-        pachet_tinta = pachete_gasite[0]
-        resurse = pachet_tinta.get("resources", [])
-        
-        resursa_valbila = None
-        for res in resurse:
-            format_fisier = res.get("format", "").upper()
-            if format_fisier in ["CSV", "XLS", "XLSX"]:
-                resursa_valbila = res
-                break
-                
-        if not resursa_valbila:
-            return None, "Nu s-au găsit tabele compatibile."
-        
-        url_direct_descarcare = resursa_valbila.get("url")
-        titlu_registru = pachet_tinta.get("title", "Registru Public")
-        
-        fisier_raw = requests.get(url_direct_descarcare, headers=headers, timeout=20)
-        if fisier_raw.status_code != 200:
-            return None, "Descărcarea fișierului brut a fost respinsă de server."
-            
-        if url_direct_descarcare.endswith('.csv') or resursa_valbila.get("format", "").upper() == "CSV":
-            df = pd.read_csv(io.BytesIO(fisier_raw.content), low_memory=False, nrows=25000, encoding_errors='ignore')
-        else:
-            df = pd.read_excel(io.BytesIO(fisier_raw.content), nrows=25000)
-            
-        return df, f"✅ CONECTAT LIVE: '{titlu_registru}' ({len(df)} rânduri)."
-    except Exception as e:
-        return None, "Serverul Guvernului nu răspunde (Timeout). Mod de siguranță activat."
-
-# Încercăm conexiunea automată
-df_guvern, mesaj_status = descarca_date_guvern_live(termen_cautare)
-
-# Sursă de date secundară (Manuală) dacă API-ul dă timeout
-historical_file = None
-if df_guvern is None:
-    st.sidebar.warning("⚠️ " + mesaj_status)
-    st.sidebar.write("Încarcă manual un extras CSV/Excel din data.gov.ro ca rezervă:")
-    historical_file = st.sidebar.file_uploader("Încarcă fișier istoric de rezervă:", type=["csv", "xlsx"])
-    
-    if historical_file:
-        try:
-            if historical_file.name.endswith('.csv'):
-                df_guvern = pd.read_csv(historical_file, low_memory=False, nrows=25000)
-            else:
-                df_guvern = pd.read_excel(historical_file, nrows=25000)
-            st.sidebar.success(f"✅ Bază de rezervă încărcată manual!")
-        except Exception as ex:
-            st.sidebar.error(f"Eroare fișier: {str(ex)}")
+# --- ÎNCĂRCARE DATE DIN SQL ---
+conn = sqlite3.connect(DB_FILE)
+if domeniu_selectat == "Toate":
+    query_sql = "SELECT autoritate_contractanta, contractant_castigator, domeniu, valoare_eur, numar_contracte FROM istoric_seap ORDER BY numar_contracte DESC"
+    df_piata = pd.read_sql_query(query_sql, conn)
 else:
-    st.sidebar.success(mesaj_status)
+    query_sql = "SELECT autoritate_contractanta, contractant_castigator, domeniu, valoare_eur, numar_contracte FROM istoric_seap WHERE domeniu = ? ORDER BY numar_contracte DESC"
+    df_piata = pd.read_sql_query(query_sql, conn, params=(domeniu_selectat,))
+conn.close()
 
-# Formatare date istorice pentru AI
-context_istoric_piata = ""
-if df_guvern is not None:
-    col_autoritate = [c for c in df_guvern.columns if re.search(r'(autoritate|institutie|contractant)', c, re.IGNORECASE)]
-    col_furnizor = [c for c in df_guvern.columns if re.search(r'(castigator|ofertant|furnizor|societate|companie)', c, re.IGNORECASE)]
-    
-    if col_autoritate and col_furnizor:
-        aut_key = col_autoritate[0]
-        furnizor_key = col_furnizor[0]
-        
-        top_atribuiri = df_guvern.groupby([aut_key, furnizor_key]).size().reset_index(name='Total_Contracte')
-        top_atribuiri = top_atribuiri.sort_values(by='Total_Contracte', ascending=False).head(40)
-        
-        context_istoric_piata = "--- ISTORIC DE PIAȚĂ EXTRACT (CORELARE ANTICORUPȚIE) ---\n"
-        for _, row in top_atribuiri.iterrows():
-            context_istoric_piata += f"Instituția [{row[aut_key]}] a oferit istoric {row['Total_Contracte']} contracte către compania [{row[furnizor_key]}]\n"
+st.sidebar.write(f"Monstru de date SQL activ: {len(df_piata)} conexiuni încarcate.")
+
+# Pregătim contextul istoric pentru AI
+context_istoric_piata = "--- ISTORIC DE PIAȚĂ FILTRAT SEAP (CORELARE ANTICORUPȚIE) ---\n"
+for _, row in df_piata.iterrows():
+    context_istoric_piata += f"Sector: [{row['domeniu']}] | Autoritatea: [{row['autoritate_contractanta']}] -> Favorizat istoric: [{row['contractant_castigator']}] cu {row['numar_contracte']} contracte (Valoare estimată: {row['valoare_eur']} EUR).\n"
+
+# --- ADĂUGARE INFORMAȚII NOI ÎN BAZA DE DATE (OPȚIONAL) ---
+with st.sidebar.expander("📥 Alimentează Baza SQL (CSV Personal)"):
+    uploaded_csv = st.file_uploader("Încarcă extras SEAP curat:", type=["csv"])
+    if uploaded_csv:
+        try:
+            df_nou = pd.read_csv(uploaded_csv)
+            # Aici se pot mapa coloanele tale reale în tabela SQLite
+            st.success("Fișier pregătit pentru integrare!")
+        except Exception as ex:
+            st.error(f"Eroare: {str(ex)}")
 
 # --- PROCESARE ARHIVĂ SEAP NOUĂ ---
 if api_key:
@@ -125,11 +103,11 @@ if api_key:
     
     col1, col2 = st.columns([1, 1])
     with col1:
-        st.subheader("📁 Urcă documentele noi pentru scanare")
-        uploaded_zip = st.file_uploader("Trage aici arhiva ZIP din SEAP:", type=["zip"])
+        st.subheader("📁 Încarcă documentația de atribuire curentă")
+        uploaded_zip = st.file_uploader("Trage aici arhiva ZIP (Caiet de Sarcini, Fișă de Date):", type=["zip"])
     
-    if uploaded_zip and st.button("🚀 Lansează Auditul Structural & Corelare"):
-        with st.spinner("🧠 Serverul analizează documentele și verifică istoricul pieței..."):
+    if uploaded_zip and st.button("🚀 Execută Audit Structural & Scanare Monopol"):
+        with st.spinner("🧠 Serverul analizează documentația tehnică în raport cu istoricul selectat..."):
             with tempfile.TemporaryDirectory() as tmpdir:
                 zip_path = os.path.join(tmpdir, "seap_archive.zip")
                 with open(zip_path, "wb") as f:
@@ -156,39 +134,40 @@ if api_key:
                                 with open(cale_fisier, "rb") as f:
                                     file_bytes = f.read()
                                 continut_apel_gemini.append({"mime_type": mime_type, "data": file_bytes})
-                                lista_fisiere_procesate.append(f"✅ Document pregătit: `{file}`")
+                                lista_fisiere_procesate.append(f"✅ Document mapat: `{file}`")
                             except Exception as e:
-                                lista_fisiere_procesate.append(f"❌ Eroare la citirea `{file}`: {str(e)}")
+                                lista_fisiere_procesate.append(f"❌ Eroare citire `{file}`: {str(e)}")
                                 
                         elif extensie == "docx":
                             try:
                                 text_word = docx2txt.process(cale_fisier)
-                                texte_extrase.append(f"--- FIȘIER WORD: {file} ---\n{text_word}\n")
-                                lista_fisiere_procesate.append(f"📝 Text extras din Word: `{file}`")
+                                texte_extrase.append(f"--- DOCUMENT DOCX: {file} ---\n{text_word}\n")
+                                lista_fisiere_procesate.append(f"📝 Text extras: `{file}`")
                             except Exception as e:
-                                lista_fisiere_procesate.append(f"❌ Nu am putut citi Word `{file}`: {str(e)}")
+                                lista_fisiere_procesate.append(f"❌ Eroare DOCX `{file}`: {str(e)}")
 
                 with col2:
-                    st.write("### 🗂️ Structura licitației curente:")
+                    st.write("### 🗂️ Fișiere identificate în licitație:")
                     for item in lista_fisiere_procesate:
                         st.write(item)
                 
                 if continut_apel_gemini or texte_extrase:
                     prompt_master = f"""
-                    Ești un auditor de elită, expert în achiziții publice în România și detectarea licitațiilor trucate, barierelor artificiale și coluziunii.
-                    Sarcina ta este să ignori limbajul birocratic formal și să scoți la lumină detaliile ascunse.
+                    Ești un investigator de elită specializat în achiziții publice de mare complexitate în România, axat pe două domenii critice:
+                    1. CONSTRUCȚII ȘI LUCRĂRI DE INFRASTRUCTURĂ (bariere prin utilaje specifice, cifre de afaceri absurde, experiență similară restrictivă).
+                    2. IT ȘI SISTEME INTEGRATE (cerințe de mărci mascate, certificări de producător restrictive, arhitecturi software proprietare impuse).
                     
-                    Iată datele de piață istorice disponibile pentru corelare:
-                    {context_istoric_piata if context_istoric_piata else "Nu există date istorice încărcate în acest moment. Analizează documentele curente pentru anomalii structurale interne."}
+                    Iată istoricul de piață extras din baza noastră de date SQL pentru acest domeniu:
+                    {context_istoric_piata}
                     
-                    Analizează fișierele trimise și generează un RAPORT DE INVESTIGAȚIE STRATEGICĂ bazat pe următoarea Matrice de Risc:
+                    Analizează documentele transmise și generează un RAPORT DE AUDIT STRUCTURAL DE RISC:
                     
-                    1. AUDIT DE FAVORIZARE ȘI MONOPOL ISTORIC: Verifică ce Autoritate Contractantă organizează licitația și dacă numele ei sau firme corelate apar în datele istorice de mai sus. Există risc de monopol sau rețetă repetitivă?
-                    2. CERINȚE RESTRICTIVE / CU DEDICAȚIE (Bariere Tehnice): Scanează criteriile de calificare, specificațiile din Caietul de Sarcini și Fișa de date. Caută dimensiuni fixe, certificări absurde non-standard, sau mărci mascate care blochează concurența liberă.
-                    3. CAPCANE LOGISTICE ȘI DE TIMP: Analizează dacă termenele de execuție sau de livrare sunt suspect de scurte (indiciu că favorizează un ofertant care are deja infrastructura mobilizată sau produsele pe stoc).
-                    4. VERDICT ȘI PROCENT DE RISC STRUCTURAL: Oferă o concluzie clară. Pune un scor procentual de risc (ex: Risc de dedicare/trucare: 85%) și justifică-l dur.
-                    
-                    Fii extrem de incisiv, folosește un ton ferm de investigator și listează direct punctele vulnerabile găsite.
+                    A. IDENTIFICARE CONTEXT ȘI PROFIL: Ce autoritate organizează licitația și ce obiect are? Apare această autoritate în istoricul SQL de mai sus cu un istoric de atribuiri repetitive către vreo firmă anume?
+                    B. BARIERE ȘI CAPCANE TEHNICE (SPECIFICE SECTORULUI):
+                       - Dacă e IT: Identifică specificații restrictive legate de echipamente, licențe specifice sau certificări inutile (ex: certificări de nișă solicitate echipei care exclud companii competitive).
+                       - Dacă sunt LUCRĂRI: Identifică cerințe disproporționate de utilaje, distanțe absurde pentru stațiile de asfalt/beton sau cerințe de experiență similară care copiază un proiect executat în trecut de un singur operator.
+                    C. MATRICEA DE EXCLUDERE: Există indicii clare că acest caiet de sarcini este scris pe baza broșurii de prezentare a unui singur ofertant?
+                    D. SCOR DE INDICIU DE TRUCARE (0-100%): Oferă un procent dur și justifică-l strict pe baza anomaliilor găsite.
                     """
                     
                     payload_final = [prompt_master]
@@ -198,7 +177,7 @@ if api_key:
                     
                     try:
                         st.markdown("---")
-                        st.subheader("📊 RAPORT DE INVESTIGAȚIE DE PROFUNZIME (TENDERX-RAY)")
+                        st.subheader("📊 RAPORT FILTRAT DE INVESTIGAȚIE (TENDERX-RAY PRO)")
                         
                         zona_raport = st.empty()
                         raspuns_ai = model.generate_content(payload_final, stream=True)
@@ -210,6 +189,7 @@ if api_key:
                             
                         st.balloons()
                     except Exception as e:
-                        st.error(f"Eroare la generarea raportului final: {str(e)}")
+                        st.error("🚨 Detalii eroare tehnică la comunicarea cu AI:")
+                        st.exception(e)
 else:
     st.sidebar.warning("⚠️ Introdu cheia ta API în bara din stânga pentru a activa motorul AI.")
