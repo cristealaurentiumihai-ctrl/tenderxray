@@ -6,17 +6,21 @@ import zipfile
 import docx2txt
 
 st.set_page_config(page_title="TenderX-Ray AI", page_icon="🩻", layout="centered")
-st.title("🩻 TenderX-Ray — Sistem Corectat")
-st.write("Încarcă arhiva ZIP din SEAP. Fișierele sunt acum procesate securizat în memorie.")
+st.title("🩻 TenderX-Ray — Versiunea Finală")
+st.write("Încarcă arhiva ZIP din SEAP. Fișierele sunt procesate securizat.")
 
 st.sidebar.header("⚙️ Configurare Sistem")
 raw_api_key = st.sidebar.text_input("Introdu Cheia API:", type="password")
 api_key = raw_api_key.strip() if raw_api_key else ""
 
+# Am adăugat selector de modele pentru a evita erorile de tip 404 Not Found
+lista_modele = ["gemini-1.5-flash", "gemini-2.5-flash", "gemini-1.5-pro"]
+model_ales = st.sidebar.selectbox("Alege Modelul AI:", lista_modele, index=0)
+
 if api_key:
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.5-pro')
+        model = genai.GenerativeModel(model_ales)
     except Exception as e:
         st.sidebar.error(f"Eroare inițializare Google: {str(e)}")
     
@@ -47,7 +51,6 @@ if api_key:
                             mime_type = "application/pdf" if extensie == "pdf" else f"image/{extensie}"
                             if mime_type == "image/jpg": mime_type = "image/jpeg"
                             try:
-                                # Citim fișierul direct în bytes (evităm complet bug-ul genai.upload_file)
                                 with open(cale_fisier, "rb") as f:
                                     file_bytes = f.read()
                                 
@@ -89,6 +92,6 @@ if api_key:
                         st.write(raspuns_ai.text)
                         st.balloons()
                     except Exception as e:
-                        st.error(f"Eroare la generarea raportului final: {str(e)}")
+                        st.error(f"Eroare la generarea raportului final cu modelul {model_ales}: {str(e)}")
 else:
     st.warning("⚠️ Introduceți cheia API în bara din stânga pentru a activa motorul AI.")
