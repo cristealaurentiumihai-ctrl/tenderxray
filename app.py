@@ -78,3 +78,4 @@ if api_key:
                     st.balloons()
 else:
     st.warning("⚠️ Introduceți cheia API în bara din stânga pentru a activa motorul AI.")
+    # update
