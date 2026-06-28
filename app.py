@@ -6,11 +6,10 @@ import zipfile
 import docx2txt
 
 st.set_page_config(page_title="TenderX-Ray AI", page_icon="🩻", layout="centered")
-st.title("🩻 TenderX-Ray — Auto-Clean System")
-st.write("Încarcă arhiva ZIP din SEAP. Sistemul curăță acum automat cheia API de spații invizibile.")
+st.title("🩻 TenderX-Ray — Sistem Corectat")
+st.write("Încarcă arhiva ZIP din SEAP. Fișierele sunt acum procesate securizat în memorie.")
 
 st.sidebar.header("⚙️ Configurare Sistem")
-# Am adăugat .strip() la finalul preluării textului pentru a șterge spațiile goale accidentale
 raw_api_key = st.sidebar.text_input("Introdu Cheia API:", type="password")
 api_key = raw_api_key.strip() if raw_api_key else ""
 
@@ -24,7 +23,7 @@ if api_key:
     uploaded_zip = st.file_uploader("Trage aici arhiva ZIP din SEAP:", type=["zip"])
     
     if uploaded_zip and st.button("🚀 Lansează Auditul Încrucișat"):
-        with st.spinner("🧠 Scanare în curs..."):
+        with st.spinner("🧠 Scanare și analiză în curs..."):
             with tempfile.TemporaryDirectory() as tmpdir:
                 zip_path = os.path.join(tmpdir, "seap_archive.zip")
                 with open(zip_path, "wb") as f:
@@ -48,11 +47,17 @@ if api_key:
                             mime_type = "application/pdf" if extensie == "pdf" else f"image/{extensie}"
                             if mime_type == "image/jpg": mime_type = "image/jpeg"
                             try:
-                                g_file = genai.upload_file(path=cale_fisier, mime_type=mime_type)
-                                continut_apel_gemini.append(g_file)
-                                lista_fisiere_procesate.append(f"✅ Fișier pregătit: `{file}`")
+                                # Citim fișierul direct în bytes (evităm complet bug-ul genai.upload_file)
+                                with open(cale_fisier, "rb") as f:
+                                    file_bytes = f.read()
+                                
+                                continut_apel_gemini.append({
+                                    "mime_type": mime_type,
+                                    "data": file_bytes
+                                })
+                                lista_fisiere_procesate.append(f"✅ Document pregătit: `{file}`")
                             except Exception as e:
-                                lista_fisiere_procesate.append(f"❌ Eroare la `{file}`. DETALII: **{str(e)}**")
+                                lista_fisiere_procesate.append(f"❌ Eroare la citirea `{file}`: {str(e)}")
                                 
                         elif extensie == "docx":
                             try:
@@ -60,7 +65,7 @@ if api_key:
                                 texte_extrase.append(f"--- FIȘIER WORD: {file} ---\n{text_word}\n")
                                 lista_fisiere_procesate.append(f"📝 Text extras din Word: `{file}`")
                             except Exception as e:
-                                lista_fisiere_procesate.append(f"❌ Nu am putut citi Word `{file}`. DETALII: **{str(e)}**")
+                                lista_fisiere_procesate.append(f"❌ Nu am putut citi Word `{file}`: {str(e)}")
 
                 st.write("### 🗂️ Structura arhivei procesate:")
                 for item in lista_fisiere_procesate:
@@ -68,8 +73,9 @@ if api_key:
                 
                 if continut_apel_gemini or texte_extrase:
                     prompt_master = (
-                        "Ești un expert în auditul licitațiilor SEAP. Fă un audit încrucișat între toate aceste fișiere. "
-                        "Caută contradicții sau neconcordanțe între partea scrisă și planșele grafice. Generează un raport pe puncte de risc."
+                        "Ești un expert în auditul licitațiilor publice (SEAP). Fă un audit încrucișat amănunțit între toate aceste fișiere. "
+                        "Caută contradicții, cerințe tehnice abuzive, neconcordanțe între partea scrisă și planșe sau detalii care pot bloca execuția. "
+                        "Generează un raport structurat pe puncte de risc."
                     )
                     payload_final = [prompt_master]
                     if texte_extrase:
