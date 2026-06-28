@@ -6,8 +6,8 @@ import zipfile
 import docx2txt
 
 st.set_page_config(page_title="TenderX-Ray AI", page_icon="🩻", layout="centered")
-st.title("🩻 TenderX-Ray — Integrare Totală SEAP")
-st.write("Încarcă direct arhiva ZIP descărcată din SEAP. AI o va analiza încrucișat.")
+st.title("🩻 TenderX-Ray — Diagnostic System")
+st.write("Încarcă arhiva ZIP din SEAP. Dacă apare o eroare, sistemul va afișa detaliile tehnice exacte.")
 
 st.sidebar.header("⚙️ Configurare Sistem")
 api_key = st.sidebar.text_input("Introdu Cheia API:", type="password")
@@ -45,17 +45,18 @@ if api_key:
                             try:
                                 g_file = genai.upload_file(path=cale_fisier, mime_type=mime_type)
                                 continut_apel_gemini.append(g_file)
-                                lista_fisiere_procesate.append(f"✅ Fișier detectat: `{file}`")
-                            except:
-                                lista_fisiere_procesate.append(f"❌ Eroare la trimiterea `{file}`")
+                                lista_fisiere_procesate.append(f"✅ Fișier detectat și trimis: `{file}`")
+                            except Exception as e:
+                                # Aici extragem eroarea reală pentru diagnostic
+                                lista_fisiere_procesate.append(f"❌ Eroare la trimiterea `{file}`. DETALII: **{str(e)}**")
                                 
                         elif extensie == "docx":
                             try:
                                 text_word = docx2txt.process(cale_fisier)
                                 texte_extrase.append(f"--- FIȘIER WORD: {file} ---\n{text_word}\n")
                                 lista_fisiere_procesate.append(f"📝 Text din Word: `{file}`")
-                            except:
-                                lista_fisiere_procesate.append(f"❌ Nu am putut citi Word: `{file}`")
+                            except Exception as e:
+                                lista_fisiere_procesate.append(f"❌ Nu am putut citi Word `{file}`. DETALII: **{str(e)}**")
 
                 st.write("### 🗂️ Structura arhivei procesate:")
                 for item in lista_fisiere_procesate:
@@ -71,11 +72,13 @@ if api_key:
                         payload_final.append("\n".join(texte_extrase))
                     payload_final.extend(continut_apel_gemini)
                     
-                    raspuns_ai = model.generate_content(payload_final)
-                    st.markdown("---")
-                    st.markdown("### 📊 Raport de Audit Integrat SEAP")
-                    st.write(raspuns_ai.text)
-                    st.balloons()
+                    try:
+                        raspuns_ai = model.generate_content(payload_final)
+                        st.markdown("---")
+                        st.markdown("### 📊 Raport de Audit Integrat SEAP")
+                        st.write(raspuns_ai.text)
+                        st.balloons()
+                    except Exception as e:
+                        st.error(f"Eroare la generarea raportului final: {str(e)}")
 else:
     st.warning("⚠️ Introduceți cheia API în bara din stânga pentru a activa motorul AI.")
-    # update
