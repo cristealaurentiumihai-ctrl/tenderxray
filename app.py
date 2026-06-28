@@ -6,15 +6,20 @@ import zipfile
 import docx2txt
 
 st.set_page_config(page_title="TenderX-Ray AI", page_icon="🩻", layout="centered")
-st.title("🩻 TenderX-Ray — Diagnostic System")
-st.write("Încarcă arhiva ZIP din SEAP. Dacă apare o eroare, sistemul va afișa detaliile tehnice exacte.")
+st.title("🩻 TenderX-Ray — Auto-Clean System")
+st.write("Încarcă arhiva ZIP din SEAP. Sistemul curăță acum automat cheia API de spații invizibile.")
 
 st.sidebar.header("⚙️ Configurare Sistem")
-api_key = st.sidebar.text_input("Introdu Cheia API:", type="password")
+# Am adăugat .strip() la finalul preluării textului pentru a șterge spațiile goale accidentale
+raw_api_key = st.sidebar.text_input("Introdu Cheia API:", type="password")
+api_key = raw_api_key.strip() if raw_api_key else ""
 
 if api_key:
-    genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-pro')
+    try:
+        genai.configure(api_key=api_key)
+        model = genai.GenerativeModel('gemini-1.5-pro')
+    except Exception as e:
+        st.sidebar.error(f"Eroare inițializare Google: {str(e)}")
     
     uploaded_zip = st.file_uploader("Trage aici arhiva ZIP din SEAP:", type=["zip"])
     
@@ -45,16 +50,15 @@ if api_key:
                             try:
                                 g_file = genai.upload_file(path=cale_fisier, mime_type=mime_type)
                                 continut_apel_gemini.append(g_file)
-                                lista_fisiere_procesate.append(f"✅ Fișier detectat și trimis: `{file}`")
+                                lista_fisiere_procesate.append(f"✅ Fișier pregătit: `{file}`")
                             except Exception as e:
-                                # Aici extragem eroarea reală pentru diagnostic
-                                lista_fisiere_procesate.append(f"❌ Eroare la trimiterea `{file}`. DETALII: **{str(e)}**")
+                                lista_fisiere_procesate.append(f"❌ Eroare la `{file}`. DETALII: **{str(e)}**")
                                 
                         elif extensie == "docx":
                             try:
                                 text_word = docx2txt.process(cale_fisier)
                                 texte_extrase.append(f"--- FIȘIER WORD: {file} ---\n{text_word}\n")
-                                lista_fisiere_procesate.append(f"📝 Text din Word: `{file}`")
+                                lista_fisiere_procesate.append(f"📝 Text extras din Word: `{file}`")
                             except Exception as e:
                                 lista_fisiere_procesate.append(f"❌ Nu am putut citi Word `{file}`. DETALII: **{str(e)}**")
 
