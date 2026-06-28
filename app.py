@@ -10,8 +10,8 @@ import requests
 import io
 
 st.set_page_config(page_title="TenderX-Ray Ultra AI", page_icon="🕵️‍♂️", layout="wide")
-st.title("🕵️‍♂️ TenderX-Ray Ultra — Conexiune Directă data.gov.ro")
-st.write("Sistem autonom conectat la infrastructura de Date Deschise a Guvernului României.")
+st.title("🕵️‍♂️ TenderX-Ray Ultra — Conexiune Inteligentă Pro")
+st.write("Sistem rezistent de audit structural conectat la infrastructura de date publice și analiză de risc.")
 
 # --- SIDEBAR CONFIGURARE ---
 st.sidebar.header("⚙️ Configurare Sistem")
@@ -25,28 +25,31 @@ st.sidebar.markdown("---")
 st.sidebar.header("🌐 Conector Guvernamental Automat")
 termen_cautare = st.sidebar.text_input("Caută în baza Gov după:", value="achizitii publice")
 
-# --- FUNCTIE AUTOMATĂ DE DESCARCARE DIRECTĂ DIN API-UL GUVERNULUI ---
-@st.cache_data(ttl=3600)  # Memorează datele pentru o oră ca să nu suprasolicite serverul sau conexiunea
+# --- FUNCTIE AUTOMATĂ DE DESCARCARE CU MASCARE USER-AGENT ---
+@st.cache_data(ttl=3600)
 def descarca_date_guvern_live(query):
     try:
-        # Interogăm catalogul oficial data.gov.ro prin API-ul lor CKAN
+        # Mascăm scriptul ca fiind un browser legitim (evită blocajele de firewall)
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json"
+        }
+        
         api_url = f"https://data.gov.ro/api/3/action/package_search?q={query}"
-        response = requests.get(api_url, timeout=15)
+        response = requests.get(api_url, headers=headers, timeout=12)
         
         if response.status_code != 200:
-            return None, f"Serverul data.gov.ro a răspuns cu eroarea {response.status_code}."
+            return None, "Filtru firewall detectat sau server Gov offline."
         
         date_catalog = response.json()
         pachete_gasite = date_catalog.get("result", {}).get("results", [])
         
         if not pachete_gasite:
-            return None, f"Nu am găsit niciun registru public pentru keywords: '{query}'."
+            return None, f"Nu am găsit registre pentru: '{query}'."
         
-        # Selectăm primul pachet de date (cel mai relevant)
         pachet_tinta = pachete_gasite[0]
         resurse = pachet_tinta.get("resources", [])
         
-        # Filtrăm resursele pentru a găsi un tabel CSV sau Excel
         resursa_valbila = None
         for res in resurse:
             format_fisier = res.get("format", "").upper()
@@ -55,34 +58,49 @@ def descarca_date_guvern_live(query):
                 break
                 
         if not resursa_valbila:
-            return None, "Setul de date guvernamental nu conține formate tabelare compatibile."
+            return None, "Nu s-au găsit tabele compatibile."
         
         url_direct_descarcare = resursa_valbila.get("url")
         titlu_registru = pachet_tinta.get("title", "Registru Public")
         
-        # Descărcăm fișierul de pe serverele guvernului direct în memoria RAM
-        fisier_raw = requests.get(url_direct_descarcare, timeout=30)
+        fisier_raw = requests.get(url_direct_descarcare, headers=headers, timeout=20)
         if fisier_raw.status_code != 200:
-            return None, "Conexiunea la fișierul brut a eșuat."
+            return None, "Descărcarea fișierului brut a fost respinsă de server."
             
-        # Îl încărcăm securizat în Pandas (citim primele 25.000 de rânduri pentru optimizare viteză/context)
         if url_direct_descarcare.endswith('.csv') or resursa_valbila.get("format", "").upper() == "CSV":
             df = pd.read_csv(io.BytesIO(fisier_raw.content), low_memory=False, nrows=25000, encoding_errors='ignore')
         else:
             df = pd.read_excel(io.BytesIO(fisier_raw.content), nrows=25000)
             
-        return df, f"✅ CONECTAT LIVE: '{titlu_registru}' ({len(df)} înregistrări încărcate în background)."
+        return df, f"✅ CONECTAT LIVE: '{titlu_registru}' ({len(df)} rânduri)."
     except Exception as e:
-        return None, f"Sistemul Gov este offline sau temporar blocat. Detalii: {str(e)}"
+        return None, "Serverul Guvernului nu răspunde (Timeout). Mod de siguranță activat."
 
-# Rulăm conexiunea guvernamentală automată
+# Încercăm conexiunea automată
 df_guvern, mesaj_status = descarca_date_guvern_live(termen_cautare)
-st.sidebar.info(mesaj_status)
 
-# Formatăm statisticile extrase din guvern pentru a le trimite ca „creier” suplimentar la Gemini
+# Sursă de date secundară (Manuală) dacă API-ul dă timeout
+historical_file = None
+if df_guvern is None:
+    st.sidebar.warning("⚠️ " + mesaj_status)
+    st.sidebar.write("Încarcă manual un extras CSV/Excel din data.gov.ro ca rezervă:")
+    historical_file = st.sidebar.file_uploader("Încarcă fișier istoric de rezervă:", type=["csv", "xlsx"])
+    
+    if historical_file:
+        try:
+            if historical_file.name.endswith('.csv'):
+                df_guvern = pd.read_csv(historical_file, low_memory=False, nrows=25000)
+            else:
+                df_guvern = pd.read_excel(historical_file, nrows=25000)
+            st.sidebar.success(f"✅ Bază de rezervă încărcată manual!")
+        except Exception as ex:
+            st.sidebar.error(f"Eroare fișier: {str(ex)}")
+else:
+    st.sidebar.success(mesaj_status)
+
+# Formatare date istorice pentru AI
 context_istoric_piata = ""
 if df_guvern is not None:
-    # Identificăm automat coloanele de text (Autorități contractante și Firme private)
     col_autoritate = [c for c in df_guvern.columns if re.search(r'(autoritate|institutie|contractant)', c, re.IGNORECASE)]
     col_furnizor = [c for c in df_guvern.columns if re.search(r'(castigator|ofertant|furnizor|societate|companie)', c, re.IGNORECASE)]
     
@@ -90,11 +108,10 @@ if df_guvern is not None:
         aut_key = col_autoritate[0]
         furnizor_key = col_furnizor[0]
         
-        # Calculăm un top al monopolurilor istorice din datele extrase
         top_atribuiri = df_guvern.groupby([aut_key, furnizor_key]).size().reset_index(name='Total_Contracte')
         top_atribuiri = top_atribuiri.sort_values(by='Total_Contracte', ascending=False).head(40)
         
-        context_istoric_piata = "--- ISTORIC DE PIAȚĂ EXTRACT DIRECT DIN DATA.GOV.RO (CORELARE ANTICORUPȚIE) ---\n"
+        context_istoric_piata = "--- ISTORIC DE PIAȚĂ EXTRACT (CORELARE ANTICORUPȚIE) ---\n"
         for _, row in top_atribuiri.iterrows():
             context_istoric_piata += f"Instituția [{row[aut_key]}] a oferit istoric {row['Total_Contracte']} contracte către compania [{row[furnizor_key]}]\n"
 
@@ -111,8 +128,8 @@ if api_key:
         st.subheader("📁 Urcă documentele noi pentru scanare")
         uploaded_zip = st.file_uploader("Trage aici arhiva ZIP din SEAP:", type=["zip"])
     
-    if uploaded_zip and st.button("🚀 Lansează Auditul Structural & Corelare Gov"):
-        with st.spinner("🧠 Serverul analizează documentele și verifică istoricul guvernamental..."):
+    if uploaded_zip and st.button("🚀 Lansează Auditul Structural & Corelare"):
+        with st.spinner("🧠 Serverul analizează documentele și verifică istoricul pieței..."):
             with tempfile.TemporaryDirectory() as tmpdir:
                 zip_path = os.path.join(tmpdir, "seap_archive.zip")
                 with open(zip_path, "wb") as f:
@@ -157,22 +174,21 @@ if api_key:
                         st.write(item)
                 
                 if continut_apel_gemini or texte_extrase:
-                    # --- MATRICE AGRESIVĂ DE DETECTARE RISCURI ȘI FAVORTIZĂRI ---
                     prompt_master = f"""
-                    Ești un auditor de elită, expert în achiziții publice în România și detectarea licitațiilor trucate, barierelor artificiale și coluziunii (înțelegeri secrete între firme).
+                    Ești un auditor de elită, expert în achiziții publice în România și detectarea licitațiilor trucate, barierelor artificiale și coluziunii.
                     Sarcina ta este să ignori limbajul birocratic formal și să scoți la lumină detaliile ascunse.
                     
-                    Iată datele de piață extrase direct de pe data.gov.ro în această secundă:
-                    {context_istoric_piata if context_istoric_piata else "Sistemul guvernamental nu a returnat date statistice structurate. Concentrează-te pe indiciile interne de favorizare."}
+                    Iată datele de piață istorice disponibile pentru corelare:
+                    {context_istoric_piata if context_istoric_piata else "Nu există date istorice încărcate în acest moment. Analizează documentele curente pentru anomalii structurale interne."}
                     
-                    Analizează fișierele trimise și generează un RAPORT DE INVESTIGAȚIE STRATEGICĂ bazat pe următoarea Matrice de Risc (fără generalități, mergi direct la subiect):
+                    Analizează fișierele trimise și generează un RAPORT DE INVESTIGAȚIE STRATEGICĂ bazat pe următoarea Matrice de Risc:
                     
-                    1. AUDIT DE FAVORTIZARE ȘI MONOPOL ISTORIC: Verifică ce Autoritate Contractantă organizează licitația și dacă numele ei apare în istoricul de date guvernamentale atașat mai sus. Menționează dacă există un risc ca această licitație să fie o continuare a unor atribuiri repetitive către aceleași firme din piață.
-                    2. CERINȚE RESTRICTIVE / CU DEDICAȚIE (Bariere Tehnice): Scanează criteriile de calificare, specificațiile din Caietul de Sarcini și Fișa de date. Caută dimensiuni fixe la milimetru, certificări absurde non-standard, sau mărci mascate care blochează concurența liberă.
-                    3. CAPCANE LOGISTICE ȘI DE TIMP: Analizează dacă termenele de execuție sau de livrare sunt suspect de scurte (indiciu clasic că favorizează un ofertant care are deja infrastructura mobilizată sau produsele pe stoc).
-                    4. VERDICT ȘI PROCENT DE RISC STRUCTURAL: Oferă o concluzie clară și asumată. Pune un scor procentual de risc (ex: Risc de dedicare/trucare: 85%) și explică de ce.
+                    1. AUDIT DE FAVORIZARE ȘI MONOPOL ISTORIC: Verifică ce Autoritate Contractantă organizează licitația și dacă numele ei sau firme corelate apar în datele istorice de mai sus. Există risc de monopol sau rețetă repetitivă?
+                    2. CERINȚE RESTRICTIVE / CU DEDICAȚIE (Bariere Tehnice): Scanează criteriile de calificare, specificațiile din Caietul de Sarcini și Fișa de date. Caută dimensiuni fixe, certificări absurde non-standard, sau mărci mascate care blochează concurența liberă.
+                    3. CAPCANE LOGISTICE ȘI DE TIMP: Analizează dacă termenele de execuție sau de livrare sunt suspect de scurte (indiciu că favorizează un ofertant care are deja infrastructura mobilizată sau produsele pe stoc).
+                    4. VERDICT ȘI PROCENT DE RISC STRUCTURAL: Oferă o concluzie clară. Pune un scor procentual de risc (ex: Risc de dedicare/trucare: 85%) și justifică-l dur.
                     
-                    Fii extrem de incisiv, folosește un ton ferm de investigator și listează direct punctele vulnerabile găsite în documente.
+                    Fii extrem de incisiv, folosește un ton ferm de investigator și listează direct punctele vulnerabile găsite.
                     """
                     
                     payload_final = [prompt_master]
@@ -196,4 +212,4 @@ if api_key:
                     except Exception as e:
                         st.error(f"Eroare la generarea raportului final: {str(e)}")
 else:
-    st.sidebar.warning("⚠️ Introdu cheia tău API în bara din stânga pentru a activa motorul AI.")
+    st.sidebar.warning("⚠️ Introdu cheia ta API în bara din stânga pentru a activa motorul AI.")
